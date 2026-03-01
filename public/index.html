@@ -1,1 +1,84 @@
 
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Exam Rank Analyzer</title>
+    <style>
+        body {
+            font-family: Arial;
+            background: #f2f2f2;
+            text-align: center;
+            margin-top: 100px;
+        }
+
+        .box {
+            width: 400px;
+            margin: auto;
+            padding: 20px;
+            background: white;
+            border-radius: 10px;
+        }
+
+        input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+        }
+
+        button {
+            padding: 10px;
+            width: 100%;
+            cursor: pointer;
+        }
+
+        #result {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="box">
+    <h2>Exam Rank Analyzer</h2>
+
+    <input type="text" id="url" placeholder="Paste exam .html link">
+    <input type="number" id="examId" placeholder="Exam ID">
+
+    <button onclick="analyze()">Analyze</button>
+
+    <div id="result"></div>
+</div>
+
+<script>
+async function analyze() {
+
+    const url = document.getElementById("url").value;
+    const examId = document.getElementById("examId").value;
+
+    const response = await fetch("/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, examId })
+    });
+
+    const data = await response.json();
+
+    if (data.error) {
+        document.getElementById("result").innerHTML =
+            "<span style='color:red'>" + data.error + "</span>";
+        return;
+    }
+
+    document.getElementById("result").innerHTML = `
+        <p>Correct: ${data.correct}</p>
+        <p>Wrong: ${data.wrong}</p>
+        <p>Unattempted: ${data.unattempted}</p>
+        <p><b>Score: ${data.score}</b></p>
+        <p><b>Rank: ${data.rank}</b></p>
+    `;
+}
+</script>
+
+</body>
+</html>
+
