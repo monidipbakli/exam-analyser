@@ -1,9 +1,9 @@
-
 const express = require("express");
 const axios = require("axios");
 const cheerio = require("cheerio");
-const mysql = require("mysql2/promise");
+const { Pool } = require("pg");
 const cors = require("cors");
+const path = require("path");
 
 const app = express();
 app.use(cors());
@@ -12,15 +12,17 @@ app.use(express.static("public"));
 
 const PORT = process.env.PORT || 3000;
 
-/* ===== DATABASE CONFIG ===== */
-const db = mysql.createPool({
-  host: process.env.DB_HOST || "localhost",
-  user: process.env.DB_USER || "root",
-  password: process.env.DB_PASS || "password",
-  database: process.env.DB_NAME || "examdb"
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
+
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 app.post("/analyze", async (req, res) => {
+
   try {
     const { url, examId } = req.body;
 
@@ -32,13 +34,13 @@ app.post("/analyze", async (req, res) => {
     const html = response.data;
     const $ = cheerio.load(html);
 
-    const [answers] = await db.execute(
-      "SELECT question_no, correct_option FROM answer_keys WHERE exam_id=?",
+    const answers = await pool.query(
+      "SELECT question_no, correct_option FROM answer_keys WHERE exam_id=$1",
       [examId]
     );
 
     let answerKey = {};
-    answers.forEach(row => {
+    answers.rows.forEach(row => {
       answerKey[row.question_no] = row.correct_option;
     });
 
@@ -51,6 +53,7 @@ app.post("/analyze", async (req, res) => {
 
     sections.forEach((section, index) => {
       const qNo = index + 1;
+
       const chosenMatch = section.match(/Chosen\s*Option\s*:?[\sA-Za-z]*([A-D0-9]+)/i);
       const chosen = chosenMatch ? chosenMatch[1] : null;
 
@@ -63,28 +66,30 @@ app.post("/analyze", async (req, res) => {
       }
     });
 
-    const [examRows] = await db.execute(
-      "SELECT marks_per_question, negative_marks FROM exams WHERE id=?",
+    const exam = await pool.query(
+      "SELECT marks_per_question, negative_marks FROM exams WHERE id=$1",
       [examId]
     );
 
-    const exam = examRows[0];
+    if (exam.rows.length === 0) {
+      return res.status(400).json({ error: "Exam not found in database" });
+    }
 
     const score =
-      correct * exam.marks_per_question -
-      wrong * exam.negative_marks;
+      correct * exam.rows[0].marks_per_question -
+      wrong * exam.rows[0].negative_marks;
 
-    await db.execute(
+    await pool.query(
       `INSERT INTO submissions
-      (exam_id, score, correct, wrong, unattempted)
-      VALUES (?, ?, ?, ?, ?)`,
+       (exam_id, score, correct, wrong, unattempted)
+       VALUES ($1, $2, $3, $4, $5)`,
       [examId, score, correct, wrong, unattempted]
     );
 
-    const [rankRow] = await db.execute(
+    const rankResult = await pool.query(
       `SELECT COUNT(*) + 1 AS rank
        FROM submissions
-       WHERE exam_id=? AND score > ?`,
+       WHERE exam_id=$1 AND score > $2`,
       [examId, score]
     );
 
@@ -93,16 +98,15 @@ app.post("/analyze", async (req, res) => {
       wrong,
       unattempted,
       score: score.toFixed(2),
-      rank: rankRow[0].rank
+      rank: rankResult.rows[0].rank
     });
 
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+
 });
-app.get("/", (req, res) => {
-  res.sendFile(__dirname + "/public/index.html");
+
+app.listen(PORT, () => {
+  console.log("Server running on port " + PORT);
 });
-app.listen(PORT, () =>
-  console.log("Server running on port " + PORT)
-);
